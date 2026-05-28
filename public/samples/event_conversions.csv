@@ -1,0 +1,10 @@
+event_name,segment,impressions,conversions
+tutorial_complete,new,12000,8400
+first_purchase,new,12000,360
+daily_login,returning,48000,41000
+gacha_pull,returning,30000,9800
+stage_clear,returning,45000,28500
+first_purchase,returning,48000,4100
+gacha_pull,whale,5200,4600
+stage_clear,whale,5000,4700
+vip_offer,whale,1800,1530
