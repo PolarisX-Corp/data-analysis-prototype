@@ -18,6 +18,17 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## サンプルデータ (CSV)
+
+CSVアップロードを試すためのサンプルデータです。ダウンロードして、左パネルの「CSV」タブからアップロードしてください（ファイル名がそのままテーブル名になります）。
+
+| ファイル | 内容 | 試せる質問の例 |
+| --- | --- | --- |
+| [daily_kpi.csv](public/samples/daily_kpi.csv) | 日次KPI（DAU・課金ユーザー数・売上） | 「先月のDAUの推移を見せて」「課金率が高いセグメントは？」 |
+| [event_conversions.csv](public/samples/event_conversions.csv) | イベント別のインプレッション/コンバージョン | 「イベント別のコンバージョン率を比較して」 |
+
+アプリ起動中は `http://localhost:3000/samples/daily_kpi.csv` のように直接ダウンロードすることもできます。
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More
