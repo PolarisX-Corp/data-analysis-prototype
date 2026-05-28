@@ -1,9 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
-import { SchemaContext, ChartConfig } from "@/types";
+import { SchemaContext, ChartConfig, DataSourceKind, TableSchema } from "@/types";
 
 const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+
+function tableRef(t: TableSchema): string {
+  if (t.source === "csv") return `\`${t.table}\``;
+  return `\`${t.project}.${t.dataset}.${t.table}\``;
+}
 
 function buildSchemaPrompt(schema: SchemaContext): string {
   const tableDescriptions = schema.tables
@@ -11,16 +16,45 @@ function buildSchemaPrompt(schema: SchemaContext): string {
       const cols = t.columns
         .map((c) => `    - ${c.name} (${c.type})${c.description ? `: ${c.description}` : ""}`)
         .join("\n");
-      return `  テーブル: \`${t.project}.${t.dataset}.${t.table}\`\n${cols}`;
+      return `  テーブル: ${tableRef(t)}\n${cols}`;
     })
     .join("\n\n");
 
-  return `あなたはデータアナリストです。以下のBigQueryスキーマを把握しています。
-
-## 利用可能なテーブル
+  return `## 利用可能なテーブル
 ${tableDescriptions}
 
 ${schema.customDefinitions ? `## KPI定義・補足情報\n${schema.customDefinitions}` : ""}`;
+}
+
+function dialectRules(dialect: DataSourceKind): string {
+  if (dialect === "csv") {
+    return `## ルール
+- アップロードされたCSVがテーブルとして登録されています
+- ユーザーの質問に対して標準SQLを生成してください（alasqlエンジンで実行されます）
+- テーブルはプロジェクト名やデータセット名を付けず、テーブル名だけで参照してください
+- BigQuery固有の関数（DATE_TRUNC, PARSE_DATE, SAFE_CAST 等）は使えません。SUM/COUNT/AVG/MIN/MAX など標準的な集計関数を使ってください
+- 列名やテーブル名にスペースや記号が含まれる場合はバッククォートで囲んでください
+- 別名（AS）には英数字とアンダースコアのみを使い、total・count・order などの予約語は避けてください
+- SQLは必ず \`\`\`sql\`\`\` ブロックで囲んでください
+- データの特性に応じて適切なグラフの種類を選び、以下のJSON形式で提案してください:
+  \`\`\`chart
+  {"type": "bar|line|pie|area|scatter", "xKey": "x軸カラム名", "yKeys": ["y軸カラム名"], "title": "グラフタイトル"}
+  \`\`\`
+- 日本語で回答してください
+- 質問がデータ分析に関係ない場合は、SQLなしで回答してください
+- SQLでは LIMIT 1000 を付けてください`;
+  }
+
+  return `## ルール
+- ユーザーの質問に対してBigQueryのSQLを生成してください
+- SQLは必ず \`\`\`sql\`\`\` ブロックで囲んでください
+- データの特性に応じて適切なグラフの種類を選び、以下のJSON形式で提案してください:
+  \`\`\`chart
+  {"type": "bar|line|pie|area|scatter", "xKey": "x軸カラム名", "yKeys": ["y軸カラム名"], "title": "グラフタイトル"}
+  \`\`\`
+- 日本語で回答してください
+- 質問がデータ分析に関係ない場合は、SQLなしで回答してください
+- SQLでは LIMIT 1000 を付けてください`;
 }
 
 interface AnalysisResult {
@@ -32,20 +66,14 @@ interface AnalysisResult {
 export async function analyzeQuestion(
   question: string,
   schema: SchemaContext,
-  conversationHistory: { role: "user" | "assistant"; content: string }[]
+  conversationHistory: { role: "user" | "assistant"; content: string }[],
+  dialect: DataSourceKind
 ): Promise<AnalysisResult> {
-  const systemPrompt = `${buildSchemaPrompt(schema)}
+  const systemPrompt = `あなたはデータアナリストです。以下のスキーマを把握しています。
 
-## ルール
-- ユーザーの質問に対してBigQueryのSQLを生成してください
-- SQLは必ず \`\`\`sql\`\`\` ブロックで囲んでください
-- データの特性に応じて適切なグラフの種類を選び、以下のJSON形式で提案してください:
-  \`\`\`chart
-  {"type": "bar|line|pie|area|scatter", "xKey": "x軸カラム名", "yKeys": ["y軸カラム名"], "title": "グラフタイトル"}
-  \`\`\`
-- 日本語で回答してください
-- 質問がデータ分析に関係ない場合は、SQLなしで回答してください
-- SQLでは LIMIT 1000 を付けてください`;
+${buildSchemaPrompt(schema)}
+
+${dialectRules(dialect)}`;
 
   const contents = [
     ...conversationHistory.map((m) => ({
