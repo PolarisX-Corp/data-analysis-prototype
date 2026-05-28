@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeQuestion } from "@/lib/ai";
 import { executeQuery } from "@/lib/bigquery";
-import { SchemaContext } from "@/types";
+import { runCsvQuery } from "@/lib/csv";
+import { CsvSource, SchemaContext } from "@/types";
 
 export async function POST(req: NextRequest) {
   try {
-    const { question, schema, conversationHistory, executeSQL } =
+    const { question, schema, conversationHistory, executeSQL, csvTables } =
       await req.json();
 
+    const csvSources: CsvSource[] = Array.isArray(csvTables) ? csvTables : [];
+    const dialect = csvSources.length > 0 ? "csv" : "bigquery";
+
+    const run = (sql: string) =>
+      dialect === "csv" ? runCsvQuery(sql, csvSources) : executeQuery(sql);
+
     if (executeSQL) {
-      const result = await executeQuery(executeSQL);
+      const result = await run(executeSQL);
       return NextResponse.json({ queryResult: result });
     }
 
@@ -24,13 +31,14 @@ export async function POST(req: NextRequest) {
     const analysis = await analyzeQuestion(
       question,
       schemaContext,
-      conversationHistory ?? []
+      conversationHistory ?? [],
+      dialect
     );
 
     let queryResult = null;
     if (analysis.sql) {
       try {
-        queryResult = await executeQuery(analysis.sql);
+        queryResult = await run(analysis.sql);
       } catch (e) {
         const message = e instanceof Error ? e.message : "Query execution failed";
         return NextResponse.json({

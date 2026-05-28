@@ -33,6 +33,7 @@ export async function getSchemas(
       })
     );
     schemas.push({
+      source: "bigquery",
       project: projectId,
       dataset: datasetId,
       table: table.id ?? "",

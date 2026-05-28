@@ -2,15 +2,16 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, Code, AlertCircle, Table, BarChart3 } from "lucide-react";
-import { Message, SchemaContext } from "@/types";
+import { CsvSource, Message, SchemaContext } from "@/types";
 import { ResultChart } from "./ResultChart";
 import { DataTable } from "./DataTable";
 
 interface ChatAreaProps {
   schema: SchemaContext;
+  csvSources: CsvSource[];
 }
 
-export function ChatArea({ schema }: ChatAreaProps) {
+export function ChatArea({ schema, csvSources }: ChatAreaProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -36,7 +37,7 @@ export function ChatArea({ schema }: ChatAreaProps) {
           id: crypto.randomUUID(),
           role: "assistant",
           content:
-            "まずは左のパネルからBigQueryのデータセットを接続してください。Project IDとDataset IDを入力してスキーマを取得すると、分析を始められます。",
+            "まずは左のパネルからデータソースを追加してください。BigQueryのProject ID / Dataset IDを入力するか、CSVファイルをアップロードすると分析を始められます。",
         },
       ]);
       setInput("");
@@ -72,6 +73,7 @@ export function ChatArea({ schema }: ChatAreaProps) {
           question,
           schema,
           conversationHistory: history.slice(-10),
+          csvTables: csvSources,
         }),
       });
 

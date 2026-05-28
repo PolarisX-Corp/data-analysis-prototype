@@ -1,8 +1,16 @@
+export type DataSourceKind = "bigquery" | "csv";
+
 export interface TableSchema {
-  project: string;
-  dataset: string;
+  source: DataSourceKind;
+  project?: string;
+  dataset?: string;
   table: string;
   columns: ColumnInfo[];
+}
+
+export interface CsvSource {
+  name: string;
+  csv: string;
 }
 
 export interface ColumnInfo {
