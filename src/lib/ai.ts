@@ -1,7 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import { SchemaContext, ChartConfig } from "@/types";
 
-const client = new Anthropic();
+const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
 function buildSchemaPrompt(schema: SchemaContext): string {
   const tableDescriptions = schema.tables
@@ -45,23 +47,24 @@ export async function analyzeQuestion(
 - 質問がデータ分析に関係ない場合は、SQLなしで回答してください
 - SQLでは LIMIT 1000 を付けてください`;
 
-  const messages = [
+  const contents = [
     ...conversationHistory.map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
     })),
-    { role: "user" as const, content: question },
+    { role: "user", parts: [{ text: question }] },
   ];
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages,
+  const response = await client.models.generateContent({
+    model: MODEL,
+    contents,
+    config: {
+      systemInstruction: systemPrompt,
+      maxOutputTokens: 4096,
+    },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.text ?? "";
 
   const sqlMatch = text.match(/```sql\n([\s\S]*?)```/);
   const chartMatch = text.match(/```chart\n([\s\S]*?)```/);
