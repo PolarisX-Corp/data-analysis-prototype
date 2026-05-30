@@ -75,8 +75,8 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const sendMessage = async () => {
-    const question = input.trim();
+  const sendMessage = async (override?: string) => {
+    const question = (override ?? input).trim();
     if (!question || loading) return;
 
     if (schema.tables.length === 0) {
@@ -138,11 +138,14 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
         role: "assistant",
         content: data.report
           ? ""
-          : data.content || data.error || "応答がありませんでした",
+          : data.clarify
+            ? data.clarify.question
+            : data.content || data.error || "応答がありませんでした",
         sql: data.sql,
         queryResult: data.queryResult,
         chartConfig: data.chartConfig,
         report: data.report,
+        clarify: data.clarify,
         error: data.error,
       };
 
@@ -212,7 +215,12 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
 
         <div className="space-y-4 max-w-4xl mx-auto">
           {visibleMessages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              onChoose={sendMessage}
+              disabled={loading}
+            />
           ))}
           <div ref={bottomRef} />
         </div>
@@ -234,7 +242,7 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
             className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
           />
           <button
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             disabled={loading || !input.trim()}
             className="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -250,7 +258,15 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({
+  message,
+  onChoose,
+  disabled,
+}: {
+  message: Message;
+  onChoose: (text: string) => void;
+  disabled: boolean;
+}) {
   const [showTable, setShowTable] = useState(false);
 
   if (message.role === "user") {
@@ -292,6 +308,21 @@ function MessageBubble({ message }: { message: Message }) {
         {message.content && (
           <div className="text-sm text-gray-800 whitespace-pre-wrap mb-2">
             {message.content}
+          </div>
+        )}
+
+        {message.clarify && message.clarify.choices.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {message.clarify.choices.map((choice) => (
+              <button
+                key={choice}
+                onClick={() => onChoose(choice)}
+                disabled={disabled}
+                className="px-3 py-1.5 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-full hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {choice}
+              </button>
+            ))}
           </div>
         )}
 
