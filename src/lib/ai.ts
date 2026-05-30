@@ -123,6 +123,57 @@ interface RawReport {
   message?: string;
 }
 
+/**
+ * 投入されたデータのスキーマから「こう指示してみては？」という質問候補を生成する。
+ * データを入れた直後に提示してユーザーの起点をつくるのが目的。
+ */
+export async function suggestQuestions(
+  schema: SchemaContext,
+  dialect: DataSourceKind
+): Promise<string[]> {
+  if (schema.tables.length === 0) return [];
+
+  const systemPrompt = `あなたはデータアナリストです。以下のスキーマを把握しています。
+
+${buildSchemaPrompt(schema)}
+
+利用可能なテーブルとカラムから、ユーザーが分析の起点にできそうな具体的な指示文を${dialect === "csv" ? "" : ""}日本語で考えてください。
+- 実在するカラム名・テーブルの内容に即した、すぐ実行できる粒度の指示にすること
+- 推移・比較・割合・ランキングなど分析の切り口が多様になるようにすること
+- 1文ごとに簡潔に（例:「日別の売上推移を見せて」）`;
+
+  const response = await getClient().models.generateContent({
+    model: MODEL,
+    contents: [{ role: "user", parts: [{ text: "分析の指示候補を4つ提案してください。" }] }],
+    config: {
+      systemInstruction: systemPrompt,
+      maxOutputTokens: 512,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          suggestions: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "分析の指示候補（4件程度）",
+          },
+        },
+        required: ["suggestions"],
+      },
+    },
+  });
+
+  try {
+    const parsed = JSON.parse(response.text ?? "{}") as { suggestions?: string[] };
+    return (parsed.suggestions ?? [])
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 6);
+  } catch {
+    return [];
+  }
+}
+
 export async function analyzeQuestion(
   question: string,
   schema: SchemaContext,
