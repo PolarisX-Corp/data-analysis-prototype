@@ -1,9 +1,20 @@
 import { GoogleGenAI } from "@google/genai";
 import { SchemaContext, ChartConfig, DataSourceKind, TableSchema } from "@/types";
 
-const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
 const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+
+function getClient(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    // キー未設定のまま呼び出すと @google/genai が Application Default
+    // Credentials にフォールバックし「Could not load the default credentials」
+    // という分かりにくいエラーになるため、ここで明示的に弾く。
+    throw new Error(
+      "GEMINI_API_KEY が設定されていません。プロジェクト直下の .env.local に GEMINI_API_KEY=... を追加し（Vercel等では環境変数に設定し）、サーバーを再起動・再デプロイしてください。"
+    );
+  }
+  return new GoogleGenAI({ apiKey });
+}
 
 function tableRef(t: TableSchema): string {
   if (t.source === "csv") return `\`${t.table}\``;
@@ -83,7 +94,7 @@ ${dialectRules(dialect)}`;
     { role: "user", parts: [{ text: question }] },
   ];
 
-  const response = await client.models.generateContent({
+  const response = await getClient().models.generateContent({
     model: MODEL,
     contents,
     config: {
