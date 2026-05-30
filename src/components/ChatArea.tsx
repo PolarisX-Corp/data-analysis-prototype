@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Dispatch, SetStateAction } from "react";
 import { Send, Loader2, Code, AlertCircle, Table, BarChart3 } from "lucide-react";
 import { CsvSource, Message, SchemaContext } from "@/types";
-import { usePersistentState } from "@/lib/usePersistentState";
 import { ResultChart } from "./ResultChart";
 import { DataTable } from "./DataTable";
 import { ReportView } from "./ReportView";
@@ -11,13 +10,16 @@ import { ReportView } from "./ReportView";
 interface ChatAreaProps {
   schema: SchemaContext;
   csvSources: CsvSource[];
+  messages: Message[];
+  setMessages: Dispatch<SetStateAction<Message[]>>;
 }
 
-export function ChatArea({ schema, csvSources }: ChatAreaProps) {
-  const [messages, setMessages] = usePersistentState<Message[]>(
-    "data-analysis:messages",
-    []
-  );
+export function ChatArea({
+  schema,
+  csvSources,
+  messages,
+  setMessages,
+}: ChatAreaProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   // 取得済みの候補を「どのテーブル構成に対するものか」と一緒に保持する。

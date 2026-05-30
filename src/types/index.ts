@@ -72,3 +72,14 @@ export interface Message {
   error?: string;
   isLoading?: boolean;
 }
+
+/** 1つの会話（チャット）。複数の会話を切り替え・参照できるようにするための単位 */
+export interface Conversation {
+  id: string;
+  /** 一覧に表示するタイトル。最初のユーザー発言から自動生成する */
+  title: string;
+  messages: Message[];
+  createdAt: string;
+  /** 並び替え用。メッセージが追加されるたびに更新する */
+  updatedAt: string;
+}
