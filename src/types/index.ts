@@ -37,6 +37,13 @@ export interface ChartConfig {
   title: string;
 }
 
+/** AIがユーザーに聞き返す逆質問（曖昧な依頼を絞り込むため） */
+export interface ClarifyTurn {
+  question: string;
+  /** 選択肢（ボタン表示）。自由入力でも答えられる */
+  choices: string[];
+}
+
 export interface Report {
   id: string;
   title: string;
@@ -58,6 +65,7 @@ export interface Message {
   queryResult?: QueryResult;
   chartConfig?: ChartConfig;
   report?: Report;
+  clarify?: ClarifyTurn;
   error?: string;
   isLoading?: boolean;
 }

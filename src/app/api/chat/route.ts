@@ -35,11 +35,16 @@ export async function POST(req: NextRequest) {
       dialect
     );
 
-    // データ分析ではない（雑談など）場合は通常返答のみ返す
-    if (!analysis.isAnalysis || !analysis.sql) {
+    // AIが聞き返してきた場合は逆質問を返す
+    if (analysis.kind === "clarify") {
       return NextResponse.json({
-        content: analysis.message || analysis.analysis,
+        clarify: { question: analysis.question, choices: analysis.choices },
       });
+    }
+
+    // データ分析ではない（雑談など）場合は通常返答のみ返す
+    if (analysis.kind === "answer") {
+      return NextResponse.json({ content: analysis.message });
     }
 
     let queryResult;

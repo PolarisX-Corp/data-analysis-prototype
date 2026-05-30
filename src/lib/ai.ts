@@ -57,9 +57,21 @@ function dialectRules(dialect: DataSourceKind): string {
 const reportSchema = {
   type: Type.OBJECT,
   properties: {
-    isAnalysis: {
-      type: Type.BOOLEAN,
-      description: "データ分析の依頼ならtrue。雑談や分析と無関係な質問ならfalse。",
+    kind: {
+      type: Type.STRING,
+      enum: ["clarify", "report", "answer"],
+      description:
+        "依頼が曖昧で確認が必要なら clarify、分析を実行できるなら report、分析と無関係なら answer。",
+    },
+    clarifyQuestion: {
+      type: Type.STRING,
+      description: "kind=clarify のときの聞き返し（1問だけ）。日本語。",
+    },
+    clarifyChoices: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description:
+        "kind=clarify のときの選択肢。実在テーブル/カラムに基づく具体的な候補を2〜4個。",
     },
     title: { type: Type.STRING, description: "レポートのタイトル" },
     definition: {
@@ -95,26 +107,28 @@ const reportSchema = {
     },
     message: {
       type: Type.STRING,
-      description: "分析でない場合に表示する通常の返答テキスト。",
+      description: "kind=answer のときに表示する通常の返答テキスト。",
     },
   },
-  required: ["isAnalysis"],
+  required: ["kind"],
 };
 
-export interface AnalysisResult {
-  /** データ分析依頼かどうか */
-  isAnalysis: boolean;
-  title: string;
-  definition: string;
-  sql: string | null;
-  analysis: string;
-  chartConfig: ChartConfig | null;
-  /** 分析でない場合の通常返答 */
-  message: string;
-}
+export type AnalysisResult =
+  | { kind: "clarify"; question: string; choices: string[] }
+  | {
+      kind: "report";
+      title: string;
+      definition: string;
+      sql: string;
+      analysis: string;
+      chartConfig: ChartConfig | null;
+    }
+  | { kind: "answer"; message: string };
 
 interface RawReport {
-  isAnalysis?: boolean;
+  kind?: "clarify" | "report" | "answer";
+  clarifyQuestion?: string;
+  clarifyChoices?: string[];
   title?: string;
   definition?: string;
   sql?: string;
@@ -186,11 +200,12 @@ ${buildSchemaPrompt(schema)}
 
 ${dialectRules(dialect)}
 
-## 出力ルール
-- ユーザーの質問がデータ分析の依頼なら isAnalysis を true にし、title / definition / sql / analysis / chart を埋めてください。
-- definition には「このレポートが何を示すか（対象・期間・指標の定義）」を必ず書いてください。
-- データの特性に応じて適切な chart を1つ選んでください。グラフ化に適さない場合のみ chart は null。
-- 質問がデータ分析と無関係な場合は isAnalysis を false にし、message に日本語で返答してください（sql は空文字）。
+## 出力ルール（kind で分岐）
+- まず依頼が分析を実行するのに十分具体的かを判断してください。
+- **曖昧な場合は kind="clarify"**: 対象の商材・期間（daily/weekly等）・対象範囲などが特定できないときは、関係しそうなテーブルを踏まえて clarifyQuestion で1問だけ聞き返し、clarifyChoices に実在データに基づく具体的な候補を2〜4個入れてください。一度に1つの論点だけ聞くこと。
+- **十分具体的なら kind="report"**: title / definition / sql / analysis / chart を埋めてください。definition には「このレポートが何を示すか（対象・期間・指標の定義）」を必ず書く。データの特性に応じて適切な chart を1つ選ぶ（グラフ化に適さない場合のみ chart=null）。
+- **分析と無関係なら kind="answer"**: message に日本語で返答（sql は空文字）。
+- 会話履歴で既にユーザーが答えた論点は再度聞かないこと。十分情報が揃ったら report に進むこと。
 - すべて日本語で記述してください。`;
 
   const contents = [
@@ -219,26 +234,32 @@ ${dialectRules(dialect)}
     raw = JSON.parse(text) as RawReport;
   } catch {
     // 構造化出力が壊れた場合は通常返答として扱う
+    return { kind: "answer", message: text };
+  }
+
+  if (raw.kind === "clarify" && raw.clarifyQuestion?.trim()) {
     return {
-      isAnalysis: false,
-      title: "",
-      definition: "",
-      sql: null,
-      analysis: "",
-      chartConfig: null,
-      message: text,
+      kind: "clarify",
+      question: raw.clarifyQuestion.trim(),
+      choices: (raw.clarifyChoices ?? []).map((c) => c.trim()).filter(Boolean),
     };
   }
 
   const sql = raw.sql?.trim() ? raw.sql.trim() : null;
+  if (raw.kind === "report" && sql) {
+    return {
+      kind: "report",
+      title: raw.title?.trim() ?? "",
+      definition: raw.definition?.trim() ?? "",
+      sql,
+      analysis: raw.analysis?.trim() ?? "",
+      chartConfig: raw.chart ?? null,
+    };
+  }
 
+  // answer、または report なのに sql が無い場合のフォールバック
   return {
-    isAnalysis: Boolean(raw.isAnalysis && sql),
-    title: raw.title?.trim() ?? "",
-    definition: raw.definition?.trim() ?? "",
-    sql,
-    analysis: raw.analysis?.trim() ?? "",
-    chartConfig: raw.chart ?? null,
-    message: raw.message?.trim() ?? "",
+    kind: "answer",
+    message: raw.message?.trim() || raw.analysis?.trim() || "うまく解釈できませんでした。",
   };
 }
