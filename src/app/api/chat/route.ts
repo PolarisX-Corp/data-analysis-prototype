@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { analyzeQuestion } from "@/lib/ai";
 import { executeQuery } from "@/lib/bigquery";
 import { runCsvQuery } from "@/lib/csv";
-import { CsvSource, SchemaContext } from "@/types";
+import { CsvSource, Report, SchemaContext } from "@/types";
 
 export async function POST(req: NextRequest) {
   try {
@@ -35,27 +35,38 @@ export async function POST(req: NextRequest) {
       dialect
     );
 
-    let queryResult = null;
-    if (analysis.sql) {
-      try {
-        queryResult = await run(analysis.sql);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : "Query execution failed";
-        return NextResponse.json({
-          content: analysis.content,
-          sql: analysis.sql,
-          chartConfig: analysis.chartConfig,
-          error: `SQL実行エラー: ${message}`,
-        });
-      }
+    // データ分析ではない（雑談など）場合は通常返答のみ返す
+    if (!analysis.isAnalysis || !analysis.sql) {
+      return NextResponse.json({
+        content: analysis.message || analysis.analysis,
+      });
     }
 
-    return NextResponse.json({
-      content: analysis.content,
+    let queryResult;
+    try {
+      queryResult = await run(analysis.sql);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Query execution failed";
+      return NextResponse.json({
+        content: analysis.analysis,
+        sql: analysis.sql,
+        chartConfig: analysis.chartConfig,
+        error: `SQL実行エラー: ${message}`,
+      });
+    }
+
+    const report: Report = {
+      id: crypto.randomUUID(),
+      title: analysis.title || question,
+      definition: analysis.definition,
       sql: analysis.sql,
       queryResult,
       chartConfig: analysis.chartConfig,
-    });
+      analysis: analysis.analysis,
+      createdAt: new Date().toISOString(),
+    };
+
+    return NextResponse.json({ report });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
