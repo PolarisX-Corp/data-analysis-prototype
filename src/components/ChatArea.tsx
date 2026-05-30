@@ -140,7 +140,9 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
           ? ""
           : data.clarify
             ? data.clarify.question
-            : data.content || data.error || "応答がありませんでした",
+            : data.error
+              ? ""
+              : data.content || "応答がありませんでした",
         sql: data.sql,
         queryResult: data.queryResult,
         chartConfig: data.chartConfig,

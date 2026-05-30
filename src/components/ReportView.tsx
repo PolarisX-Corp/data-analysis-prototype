@@ -10,8 +10,26 @@ interface ReportViewProps {
   report: Report;
 }
 
+const CHART_TYPE_LABEL: Record<string, string> = {
+  bar: "棒",
+  line: "折れ線",
+  pie: "円",
+  area: "面",
+  scatter: "散布図",
+};
+
 export function ReportView({ report }: ReportViewProps) {
   const [showTable, setShowTable] = useState(false);
+  const [chartIdx, setChartIdx] = useState(0);
+
+  // chartOptions が無い古いレポートでも壊れないよう chartConfig をフォールバック
+  const chartOptions =
+    report.chartOptions && report.chartOptions.length > 0
+      ? report.chartOptions
+      : report.chartConfig
+        ? [report.chartConfig]
+        : [];
+  const selectedChart = chartOptions[chartIdx] ?? chartOptions[0] ?? null;
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
@@ -34,8 +52,28 @@ export function ReportView({ report }: ReportViewProps) {
           </section>
         )}
 
-        {report.chartConfig && (
-          <ResultChart data={report.queryResult} config={report.chartConfig} />
+        {selectedChart && (
+          <div>
+            {chartOptions.length > 1 && (
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <span className="text-xs text-gray-400">グラフ案:</span>
+                {chartOptions.map((c, i) => (
+                  <button
+                    key={`${c.type}-${i}`}
+                    onClick={() => setChartIdx(i)}
+                    className={`px-2.5 py-1 text-xs rounded-full border ${
+                      i === chartIdx
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                    }`}
+                  >
+                    {String.fromCharCode(65 + i)}: {CHART_TYPE_LABEL[c.type] ?? c.type}
+                  </button>
+                ))}
+              </div>
+            )}
+            <ResultChart data={report.queryResult} config={selectedChart} />
+          </div>
         )}
 
         {report.analysis && (

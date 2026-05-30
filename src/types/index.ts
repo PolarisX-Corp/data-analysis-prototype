@@ -51,7 +51,10 @@ export interface Report {
   definition: string;
   sql: string;
   queryResult: QueryResult;
+  /** 推奨グラフ（chartOptions の先頭と一致） */
   chartConfig: ChartConfig | null;
+  /** ユーザーが切り替えられるグラフ案（A/B/C）。推奨が先頭 */
+  chartOptions: ChartConfig[];
   /** グラフ・集計結果を踏まえた解釈・分析 */
   analysis: string;
   createdAt: string;
