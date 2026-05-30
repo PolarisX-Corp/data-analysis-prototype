@@ -9,6 +9,7 @@ import {
   Loader2,
   Upload,
   FileSpreadsheet,
+  Trash2,
 } from "lucide-react";
 import { CsvSource, TableSchema, SchemaContext } from "@/types";
 
@@ -112,6 +113,18 @@ export function SchemaPanel({
     if (next.has(key)) next.delete(key);
     else next.add(key);
     setExpandedTables(next);
+  };
+
+  const resetData = () => {
+    if (schema.tables.length === 0 && !schema.customDefinitions && csvSources.length === 0) {
+      return;
+    }
+    const ok = window.confirm(
+      "データソース（BigQueryスキーマ・CSV・KPI定義）をすべて削除します。チャット履歴は残ります。よろしいですか？"
+    );
+    if (!ok) return;
+    onSchemaChange({ tables: [], customDefinitions: "" });
+    onCsvSourcesChange([]);
   };
 
   const removeTable = (table: TableSchema) => {
@@ -277,6 +290,16 @@ export function SchemaPanel({
           placeholder="例: DAU = 1日にログインしたユニークユーザー数&#10;課金率 = 課金ユーザー / DAU"
           className="w-full h-24 px-3 py-2 text-xs border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        <button
+          onClick={resetData}
+          className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-md hover:bg-red-50"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          データソースをリセット
+        </button>
+        <p className="mt-1.5 text-[11px] text-gray-400">
+          BigQueryスキーマ・CSV・KPI定義を削除します。チャット履歴は残ります。
+        </p>
       </div>
     </div>
   );
