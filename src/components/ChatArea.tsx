@@ -6,6 +6,7 @@ import { CsvSource, Message, SchemaContext } from "@/types";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { ResultChart } from "./ResultChart";
 import { DataTable } from "./DataTable";
+import { ReportView } from "./ReportView";
 
 interface ChatAreaProps {
   schema: SchemaContext;
@@ -93,10 +94,13 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
       const assistantMsg: Message = {
         id: loadingMsg.id,
         role: "assistant",
-        content: data.content || data.error || "応答がありませんでした",
+        content: data.report
+          ? ""
+          : data.content || data.error || "応答がありませんでした",
         sql: data.sql,
         queryResult: data.queryResult,
         chartConfig: data.chartConfig,
+        report: data.report,
         error: data.error,
       };
 
@@ -232,6 +236,8 @@ function MessageBubble({ message }: { message: Message }) {
             {message.content}
           </div>
         )}
+
+        {message.report && <ReportView report={message.report} />}
 
         {message.sql && (
           <details className="mb-2">

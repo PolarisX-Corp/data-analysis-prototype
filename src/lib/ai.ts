@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { SchemaContext, ChartConfig, DataSourceKind, TableSchema } from "@/types";
 
 const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
@@ -39,39 +39,88 @@ ${schema.customDefinitions ? `## KPI定義・補足情報\n${schema.customDefini
 
 function dialectRules(dialect: DataSourceKind): string {
   if (dialect === "csv") {
-    return `## ルール
+    return `## SQLの方言ルール
 - アップロードされたCSVがテーブルとして登録されています
-- ユーザーの質問に対して標準SQLを生成してください（alasqlエンジンで実行されます）
+- 標準SQLを生成してください（alasqlエンジンで実行されます）
 - テーブルはプロジェクト名やデータセット名を付けず、テーブル名だけで参照してください
 - BigQuery固有の関数（DATE_TRUNC, PARSE_DATE, SAFE_CAST 等）は使えません。SUM/COUNT/AVG/MIN/MAX など標準的な集計関数を使ってください
 - 列名やテーブル名にスペースや記号が含まれる場合はバッククォートで囲んでください
 - 別名（AS）には英数字とアンダースコアのみを使い、total・count・order などの予約語は避けてください
-- SQLは必ず \`\`\`sql\`\`\` ブロックで囲んでください
-- データの特性に応じて適切なグラフの種類を選び、以下のJSON形式で提案してください:
-  \`\`\`chart
-  {"type": "bar|line|pie|area|scatter", "xKey": "x軸カラム名", "yKeys": ["y軸カラム名"], "title": "グラフタイトル"}
-  \`\`\`
-- 日本語で回答してください
-- 質問がデータ分析に関係ない場合は、SQLなしで回答してください
 - SQLでは LIMIT 1000 を付けてください`;
   }
 
-  return `## ルール
+  return `## SQLの方言ルール
 - ユーザーの質問に対してBigQueryのSQLを生成してください
-- SQLは必ず \`\`\`sql\`\`\` ブロックで囲んでください
-- データの特性に応じて適切なグラフの種類を選び、以下のJSON形式で提案してください:
-  \`\`\`chart
-  {"type": "bar|line|pie|area|scatter", "xKey": "x軸カラム名", "yKeys": ["y軸カラム名"], "title": "グラフタイトル"}
-  \`\`\`
-- 日本語で回答してください
-- 質問がデータ分析に関係ない場合は、SQLなしで回答してください
 - SQLでは LIMIT 1000 を付けてください`;
 }
 
-interface AnalysisResult {
-  content: string;
+const reportSchema = {
+  type: Type.OBJECT,
+  properties: {
+    isAnalysis: {
+      type: Type.BOOLEAN,
+      description: "データ分析の依頼ならtrue。雑談や分析と無関係な質問ならfalse。",
+    },
+    title: { type: Type.STRING, description: "レポートのタイトル" },
+    definition: {
+      type: Type.STRING,
+      description:
+        "このレポート/グラフが何を示しているのかの定義。対象期間・対象範囲・指標の意味を簡潔に。",
+    },
+    sql: {
+      type: Type.STRING,
+      description: "実行するSQL文。分析でない場合は空文字。",
+    },
+    analysis: {
+      type: Type.STRING,
+      description: "想定されるデータの傾向に対する解釈・分析。日本語。",
+    },
+    chart: {
+      type: Type.OBJECT,
+      nullable: true,
+      properties: {
+        type: {
+          type: Type.STRING,
+          enum: ["bar", "line", "pie", "area", "scatter"],
+        },
+        xKey: { type: Type.STRING, description: "x軸に使うカラム名" },
+        yKeys: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: "y軸に使うカラム名（複数可）",
+        },
+        title: { type: Type.STRING },
+      },
+      required: ["type", "xKey", "yKeys", "title"],
+    },
+    message: {
+      type: Type.STRING,
+      description: "分析でない場合に表示する通常の返答テキスト。",
+    },
+  },
+  required: ["isAnalysis"],
+};
+
+export interface AnalysisResult {
+  /** データ分析依頼かどうか */
+  isAnalysis: boolean;
+  title: string;
+  definition: string;
   sql: string | null;
+  analysis: string;
   chartConfig: ChartConfig | null;
+  /** 分析でない場合の通常返答 */
+  message: string;
+}
+
+interface RawReport {
+  isAnalysis?: boolean;
+  title?: string;
+  definition?: string;
+  sql?: string;
+  analysis?: string;
+  chart?: ChartConfig | null;
+  message?: string;
 }
 
 export async function analyzeQuestion(
@@ -84,7 +133,14 @@ export async function analyzeQuestion(
 
 ${buildSchemaPrompt(schema)}
 
-${dialectRules(dialect)}`;
+${dialectRules(dialect)}
+
+## 出力ルール
+- ユーザーの質問がデータ分析の依頼なら isAnalysis を true にし、title / definition / sql / analysis / chart を埋めてください。
+- definition には「このレポートが何を示すか（対象・期間・指標の定義）」を必ず書いてください。
+- データの特性に応じて適切な chart を1つ選んでください。グラフ化に適さない場合のみ chart は null。
+- 質問がデータ分析と無関係な場合は isAnalysis を false にし、message に日本語で返答してください（sql は空文字）。
+- すべて日本語で記述してください。`;
 
   const contents = [
     ...conversationHistory.map((m) => ({
@@ -100,31 +156,38 @@ ${dialectRules(dialect)}`;
     config: {
       systemInstruction: systemPrompt,
       maxOutputTokens: 4096,
+      responseMimeType: "application/json",
+      responseSchema: reportSchema,
     },
   });
 
-  const text = response.text ?? "";
+  const text = response.text ?? "{}";
 
-  const sqlMatch = text.match(/```sql\n([\s\S]*?)```/);
-  const chartMatch = text.match(/```chart\n([\s\S]*?)```/);
-
-  let chartConfig: ChartConfig | null = null;
-  if (chartMatch) {
-    try {
-      chartConfig = JSON.parse(chartMatch[1].trim());
-    } catch {
-      // ignore parse errors
-    }
+  let raw: RawReport;
+  try {
+    raw = JSON.parse(text) as RawReport;
+  } catch {
+    // 構造化出力が壊れた場合は通常返答として扱う
+    return {
+      isAnalysis: false,
+      title: "",
+      definition: "",
+      sql: null,
+      analysis: "",
+      chartConfig: null,
+      message: text,
+    };
   }
 
-  const content = text
-    .replace(/```sql\n[\s\S]*?```/g, "")
-    .replace(/```chart\n[\s\S]*?```/g, "")
-    .trim();
+  const sql = raw.sql?.trim() ? raw.sql.trim() : null;
 
   return {
-    content,
-    sql: sqlMatch ? sqlMatch[1].trim() : null,
-    chartConfig,
+    isAnalysis: Boolean(raw.isAnalysis && sql),
+    title: raw.title?.trim() ?? "",
+    definition: raw.definition?.trim() ?? "",
+    sql,
+    analysis: raw.analysis?.trim() ?? "",
+    chartConfig: raw.chart ?? null,
+    message: raw.message?.trim() ?? "",
   };
 }

@@ -37,6 +37,19 @@ export interface ChartConfig {
   title: string;
 }
 
+export interface Report {
+  id: string;
+  title: string;
+  /** このレポート/グラフが何を示しているのかの定義 */
+  definition: string;
+  sql: string;
+  queryResult: QueryResult;
+  chartConfig: ChartConfig | null;
+  /** グラフ・集計結果を踏まえた解釈・分析 */
+  analysis: string;
+  createdAt: string;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -44,6 +57,7 @@ export interface Message {
   sql?: string;
   queryResult?: QueryResult;
   chartConfig?: ChartConfig;
+  report?: Report;
   error?: string;
   isLoading?: boolean;
 }
