@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, Code, AlertCircle, Table, BarChart3 } from "lucide-react";
 import { CsvSource, Message, SchemaContext } from "@/types";
+import { usePersistentState } from "@/lib/usePersistentState";
 import { ResultChart } from "./ResultChart";
 import { DataTable } from "./DataTable";
 
@@ -12,10 +13,20 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ schema, csvSources }: ChatAreaProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = usePersistentState<Message[]>(
+    "data-analysis:messages",
+    []
+  );
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // A "loading" bubble persisted from a request that was interrupted by a
+  // reload would otherwise spin forever, so only show in-flight bubbles while a
+  // request is actually running.
+  const visibleMessages = loading
+    ? messages
+    : messages.filter((m) => !m.isLoading);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -27,7 +38,7 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
 
     if (schema.tables.length === 0) {
       setMessages((prev) => [
-        ...prev,
+        ...prev.filter((m) => !m.isLoading),
         {
           id: crypto.randomUUID(),
           role: "user",
@@ -57,7 +68,7 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
       isLoading: true,
     };
 
-    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setMessages((prev) => [...prev.filter((m) => !m.isLoading), userMsg, loadingMsg]);
     setInput("");
     setLoading(true);
 
@@ -108,7 +119,7 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
   return (
     <div className="flex-1 flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-6">
-        {messages.length === 0 && (
+        {visibleMessages.length === 0 && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center max-w-md">
               <BarChart3 className="w-12 h-12 text-blue-500 mx-auto mb-4" />
@@ -138,7 +149,7 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
         )}
 
         <div className="space-y-4 max-w-4xl mx-auto">
-          {messages.map((msg) => (
+          {visibleMessages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}
           <div ref={bottomRef} />
