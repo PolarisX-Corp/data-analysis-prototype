@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { analyzeQuestion } from "@/lib/ai";
+import { analyzeQuestion, analyzeResult } from "@/lib/ai";
 import { executeQuery } from "@/lib/bigquery";
 import { runCsvQuery } from "@/lib/csv";
 import { CsvSource, Report, SchemaContext } from "@/types";
@@ -53,11 +53,28 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Query execution failed";
       return NextResponse.json({
-        content: analysis.analysis,
+        content: "",
         sql: analysis.sql,
-        chartConfig: analysis.chartConfig,
         error: `SQL実行エラー: ${message}`,
       });
+    }
+
+    // Stage 2: 実データを見せて、グラフを踏まえた解釈・分析と推奨グラフを生成
+    const { analysis: analysisText, recommendedChartIndex } = await analyzeResult(
+      question,
+      analysis.definition,
+      queryResult,
+      analysis.chartOptions
+    );
+
+    // 推奨グラフを先頭に並べ替える
+    const chartOptions = [...analysis.chartOptions];
+    if (
+      recommendedChartIndex > 0 &&
+      recommendedChartIndex < chartOptions.length
+    ) {
+      const [recommended] = chartOptions.splice(recommendedChartIndex, 1);
+      chartOptions.unshift(recommended);
     }
 
     const report: Report = {
@@ -66,8 +83,9 @@ export async function POST(req: NextRequest) {
       definition: analysis.definition,
       sql: analysis.sql,
       queryResult,
-      chartConfig: analysis.chartConfig,
-      analysis: analysis.analysis,
+      chartConfig: chartOptions[0] ?? null,
+      chartOptions,
+      analysis: analysisText,
       createdAt: new Date().toISOString(),
     };
 

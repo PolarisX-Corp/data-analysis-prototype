@@ -1,5 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { SchemaContext, ChartConfig, DataSourceKind, TableSchema } from "@/types";
+import {
+  SchemaContext,
+  ChartConfig,
+  DataSourceKind,
+  TableSchema,
+  QueryResult,
+} from "@/types";
 
 const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
@@ -83,27 +89,27 @@ const reportSchema = {
       type: Type.STRING,
       description: "実行するSQL文。分析でない場合は空文字。",
     },
-    analysis: {
-      type: Type.STRING,
-      description: "想定されるデータの傾向に対する解釈・分析。日本語。",
-    },
-    chart: {
-      type: Type.OBJECT,
-      nullable: true,
-      properties: {
-        type: {
-          type: Type.STRING,
-          enum: ["bar", "line", "pie", "area", "scatter"],
+    charts: {
+      type: Type.ARRAY,
+      description:
+        "このデータに適したグラフ案を1〜3個。先頭を推奨案にする。ユーザーが選べるよう異なる見せ方（折れ線/棒/面など）を提案するとよい。",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          type: {
+            type: Type.STRING,
+            enum: ["bar", "line", "pie", "area", "scatter"],
+          },
+          xKey: { type: Type.STRING, description: "x軸に使うカラム名" },
+          yKeys: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "y軸に使うカラム名（複数可）",
+          },
+          title: { type: Type.STRING },
         },
-        xKey: { type: Type.STRING, description: "x軸に使うカラム名" },
-        yKeys: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING },
-          description: "y軸に使うカラム名（複数可）",
-        },
-        title: { type: Type.STRING },
+        required: ["type", "xKey", "yKeys", "title"],
       },
-      required: ["type", "xKey", "yKeys", "title"],
     },
     message: {
       type: Type.STRING,
@@ -120,8 +126,8 @@ export type AnalysisResult =
       title: string;
       definition: string;
       sql: string;
-      analysis: string;
-      chartConfig: ChartConfig | null;
+      /** グラフ案（先頭が推奨）。解釈は実データ取得後に別途生成する */
+      chartOptions: ChartConfig[];
     }
   | { kind: "answer"; message: string };
 
@@ -132,8 +138,7 @@ interface RawReport {
   title?: string;
   definition?: string;
   sql?: string;
-  analysis?: string;
-  chart?: ChartConfig | null;
+  charts?: ChartConfig[];
   message?: string;
 }
 
@@ -203,7 +208,7 @@ ${dialectRules(dialect)}
 ## 出力ルール（kind で分岐）
 - まず依頼が分析を実行するのに十分具体的かを判断してください。
 - **曖昧な場合は kind="clarify"**: 対象の商材・期間（daily/weekly等）・対象範囲などが特定できないときは、関係しそうなテーブルを踏まえて clarifyQuestion で1問だけ聞き返し、clarifyChoices に実在データに基づく具体的な候補を2〜4個入れてください。一度に1つの論点だけ聞くこと。
-- **十分具体的なら kind="report"**: title / definition / sql / analysis / chart を埋めてください。definition には「このレポートが何を示すか（対象・期間・指標の定義）」を必ず書く。データの特性に応じて適切な chart を1つ選ぶ（グラフ化に適さない場合のみ chart=null）。
+- **十分具体的なら kind="report"**: title / definition / sql / charts を埋めてください。definition には「このレポートが何を示すか（対象・期間・指標の定義）」を必ず書く。charts にはこのデータに適したグラフ案を1〜3個（先頭が推奨）入れる。※解釈・分析はこの段階では書かないこと（実データ取得後に別途生成します）。
 - **分析と無関係なら kind="answer"**: message に日本語で返答（sql は空文字）。
 - 会話履歴で既にユーザーが答えた論点は再度聞かないこと。十分情報が揃ったら report に進むこと。
 - すべて日本語で記述してください。`;
@@ -252,14 +257,91 @@ ${dialectRules(dialect)}
       title: raw.title?.trim() ?? "",
       definition: raw.definition?.trim() ?? "",
       sql,
-      analysis: raw.analysis?.trim() ?? "",
-      chartConfig: raw.chart ?? null,
+      chartOptions: (raw.charts ?? []).filter((c) => c && c.type && c.xKey),
     };
   }
 
   // answer、または report なのに sql が無い場合のフォールバック
   return {
     kind: "answer",
-    message: raw.message?.trim() || raw.analysis?.trim() || "うまく解釈できませんでした。",
+    message: raw.message?.trim() || "うまく解釈できませんでした。",
   };
+}
+
+/**
+ * Stage 2: 実行済みクエリの「実データ」を見せて、グラフを踏まえた解釈・分析を生成する。
+ * Stage 1（analyzeQuestion）が想定で書いていた分析を、実数に基づく分析へ置き換える。
+ */
+export async function analyzeResult(
+  question: string,
+  definition: string,
+  result: QueryResult,
+  chartOptions: ChartConfig[]
+): Promise<{ analysis: string; recommendedChartIndex: number }> {
+  // 行数が多いと冗長なので先頭の代表的な行のみ渡す
+  const sampleRows = result.rows.slice(0, 50);
+  const dataPreview = JSON.stringify(
+    { columns: result.columns, totalRows: result.totalRows, rows: sampleRows },
+    null,
+    0
+  );
+  const chartList = chartOptions
+    .map((c, i) => `  ${i}: ${c.type}（${c.title}）`)
+    .join("\n");
+
+  const systemPrompt = `あなたはデータアナリストです。実行済みクエリの結果データを踏まえて、日本語で解釈・分析を述べてください。
+- 推測ではなく、提示された実データの数値・傾向に基づくこと（具体的な数値や変化に言及する）
+- 簡潔に、示唆（次に何を見るべきか等）まで触れてよい
+- グラフ案の中からこのデータを最も的確に見せられるものを recommendedChartIndex で選ぶこと`;
+
+  const userPrompt = `## 依頼
+${question}
+
+## レポートの定義
+${definition}
+
+## グラフ案
+${chartList || "（なし）"}
+
+## 実行結果データ（先頭最大50行）
+${dataPreview}`;
+
+  const response = await getClient().models.generateContent({
+    model: MODEL,
+    contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+    config: {
+      systemInstruction: systemPrompt,
+      maxOutputTokens: 2048,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          analysis: {
+            type: Type.STRING,
+            description: "実データに基づく解釈・分析（日本語）",
+          },
+          recommendedChartIndex: {
+            type: Type.INTEGER,
+            description: "推奨するグラフ案のインデックス（0始まり）",
+          },
+        },
+        required: ["analysis"],
+      },
+    },
+  });
+
+  try {
+    const parsed = JSON.parse(response.text ?? "{}") as {
+      analysis?: string;
+      recommendedChartIndex?: number;
+    };
+    const idx = parsed.recommendedChartIndex ?? 0;
+    return {
+      analysis: parsed.analysis?.trim() ?? "",
+      recommendedChartIndex:
+        Number.isInteger(idx) && idx >= 0 && idx < chartOptions.length ? idx : 0,
+    };
+  } catch {
+    return { analysis: "", recommendedChartIndex: 0 };
+  }
 }
