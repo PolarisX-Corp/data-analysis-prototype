@@ -1,10 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { Code, Table, FileText, Lightbulb } from "lucide-react";
+import {
+  Code,
+  Table,
+  FileText,
+  Lightbulb,
+  Copy,
+  Check,
+  Download,
+} from "lucide-react";
 import { Report } from "@/types";
 import { ResultChart } from "./ResultChart";
 import { DataTable } from "./DataTable";
+import {
+  reportToMarkdown,
+  queryResultToCsv,
+  downloadText,
+  safeFilename,
+} from "@/lib/export";
 
 interface ReportViewProps {
   report: Report;
@@ -21,6 +35,20 @@ const CHART_TYPE_LABEL: Record<string, string> = {
 export function ReportView({ report }: ReportViewProps) {
   const [showTable, setShowTable] = useState(false);
   const [chartIdx, setChartIdx] = useState(0);
+  const [copied, setCopied] = useState(false);
+
+  const baseName = safeFilename(report.title);
+
+  const copyMarkdown = async () => {
+    try {
+      await navigator.clipboard.writeText(reportToMarkdown(report));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // クリップボード不可の環境では .md ダウンロードにフォールバック
+      downloadText(`${baseName}.md`, reportToMarkdown(report), "text/markdown");
+    }
+  };
 
   // chartOptions が無い古いレポートでも壊れないよう chartConfig をフォールバック
   const chartOptions =
@@ -33,10 +61,52 @@ export function ReportView({ report }: ReportViewProps) {
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-        <div className="flex items-center gap-2 text-gray-800">
-          <FileText className="w-4 h-4 text-blue-600" />
-          <h3 className="text-sm font-semibold">{report.title}</h3>
+      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-gray-800 min-w-0">
+          <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+          <h3 className="text-sm font-semibold truncate">{report.title}</h3>
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            onClick={copyMarkdown}
+            title="Markdownをコピー"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:bg-gray-200 rounded"
+          >
+            {copied ? (
+              <Check className="w-3.5 h-3.5 text-green-600" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+            {copied ? "コピー済" : "Markdown"}
+          </button>
+          <button
+            onClick={() =>
+              downloadText(
+                `${baseName}.md`,
+                reportToMarkdown(report),
+                "text/markdown"
+              )
+            }
+            title="Markdownをダウンロード"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:bg-gray-200 rounded"
+          >
+            <Download className="w-3.5 h-3.5" />
+            .md
+          </button>
+          <button
+            onClick={() =>
+              downloadText(
+                `${baseName}.csv`,
+                queryResultToCsv(report.queryResult),
+                "text/csv"
+              )
+            }
+            title="集計データをCSVでダウンロード"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:bg-gray-200 rounded"
+          >
+            <Download className="w-3.5 h-3.5" />
+            .csv
+          </button>
         </div>
       </div>
 
