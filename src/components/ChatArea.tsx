@@ -20,7 +20,49 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
   );
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  // 取得済みの候補を「どのテーブル構成に対するものか」と一緒に保持する。
+  // こうすると setState は全て fetch の非同期コールバック内だけで済み、
+  // 取得中フラグは派生値として求められる。
+  const [suggestState, setSuggestState] = useState<{
+    key: string;
+    items: string[];
+  }>({ key: "", items: [] });
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // 投入されたデータのスキーマが変わるたびに「こう指示してみては？」候補を取得する。
+  // テーブル構成（参照名）が変わったときだけ再取得する。
+  const tableKey = schema.tables
+    .map((t) => `${t.source}:${t.table}`)
+    .join(",");
+
+  useEffect(() => {
+    if (schema.tables.length === 0) return;
+    let cancelled = false;
+    fetch("/api/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ schema, csvTables: csvSources }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled)
+          setSuggestState({ key: tableKey, items: data.suggestions ?? [] });
+      })
+      .catch(() => {
+        if (!cancelled) setSuggestState({ key: tableKey, items: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // schema/csvSources はオブジェクトのため、テーブル構成キーで依存を絞る
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableKey]);
+
+  const hasData = schema.tables.length > 0;
+  const suggestionsReady = suggestState.key === tableKey;
+  // データが無い状態では古い候補を見せない
+  const displaySuggestions = hasData && suggestionsReady ? suggestState.items : [];
+  const suggestLoading = hasData && !suggestionsReady;
 
   // A "loading" bubble persisted from a request that was interrupted by a
   // reload would otherwise spin forever, so only show in-flight bubbles while a
@@ -133,12 +175,28 @@ export function ChatArea({ schema, csvSources }: ChatAreaProps) {
               <p className="text-sm text-gray-500 mb-6">
                 自然言語でデータについて質問すると、SQLを生成・実行し、結果をグラフで表示します。
               </p>
+              {schema.tables.length > 0 && (
+                <p className="text-xs font-medium text-gray-400 mb-2 text-left">
+                  こう指示してみては？
+                </p>
+              )}
               <div className="space-y-2 text-left">
-                {[
-                  "先月のDAUの推移を見せて",
-                  "課金率が高いユーザーセグメントは？",
-                  "イベント別のコンバージョン率を比較して",
-                ].map((example) => (
+                {suggestLoading && (
+                  <div className="flex items-center gap-2 text-sm text-gray-400 px-4 py-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    データに合った指示候補を考えています...
+                  </div>
+                )}
+                {(displaySuggestions.length > 0
+                  ? displaySuggestions
+                  : hasData
+                    ? []
+                    : [
+                        "先月のDAUの推移を見せて",
+                        "課金率が高いユーザーセグメントは？",
+                        "イベント別のコンバージョン率を比較して",
+                      ]
+                ).map((example) => (
                   <button
                     key={example}
                     onClick={() => setInput(example)}
